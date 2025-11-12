@@ -46,3 +46,4 @@ int main(int argc,char *argv[])
   mysql_close(connexion);
   exit(0);
 }
+
