@@ -7,6 +7,7 @@
 #include <sys/ipc.h>                   // ETAPE 1a - AJOUTÉ
 #include <sys/msg.h>                   // ETAPE 1a - AJOUTÉ
 #include <signal.h>                    // ETAPE 1b - AJOUTÉ : nécessaire pour sigaction (réception de la réponse au LOGIN)
+
 extern WindowClient *w;
 
 #include "protocole.h"
@@ -32,6 +33,18 @@ static void envoiRequeteSimple(int requete)
   msgsnd(idQ, &m, sizeof(MESSAGE) - sizeof(long), 0);
 }
 
+/* *** ETAPE 2 - AJOUTE ***
+Envoie une requete contenant un nom d'utilisateur dans data1 (ACCEPT_USER ou REFUSE_USER) au serveur.
+*/
+static void envoieRequeteAvecNom(int requete, const char* nom)
+{
+  MESSAGE m;
+  m.type = 1;
+  m.expediteur = getpid();
+  m.requete = requete;
+  strcpy(m.data1,nom);
+  msgsnd(idQ,&m,sizeof(MESSAGE)-sizeof(long),0);
+}
 ///////////////////////////////////////////////////////////////////////////////////////////////////////////////
 //////////////////////////////////////////////////////////////////////////////////////////////////////////////
 /////////////////////////////////////////////////////////////////////////////////////////////////////////////
@@ -430,7 +443,17 @@ void WindowClient::on_pushButtonLogout_clicked()
 
 void WindowClient::on_pushButtonEnvoyer_clicked()
 {
-    // TO DO
+    // ETAPE 2.c : envoi du message au serveur, qui se chargera de le retransmettre aux utilisateurs que CE client a acceptes.
+    if (strlen(getAEnvoyer()) == 0) return;
+
+    MESSAGE m;
+    m.type = 1;
+    m.expediteur = getpid();
+    m.requete = SEND;
+    strcpy(m.texte,getAEnvoyer());
+    msgsnd(idQ,&m,sizeof(MESSAGE)-sizeof(long),0);
+
+    setAEnvoyer(""); // on vide le champ de saisie une fois le message envoye
 }
 
 void WindowClient::on_pushButtonConsulter_clicked()
@@ -476,71 +499,101 @@ void WindowClient::on_pushButtonModifier_clicked()
 /////////////////////////////////////////////////////////////////////////////////////////////////////////////
 void WindowClient::on_checkBox1_clicked(bool checked)
 {
+    // ETAPE 2.b : le nom associe a la case 1 est celui affiche dans lineEditConnecte1
+    const char* nom = getPersonneConnectee(1);
+    if (strlen(nom) == 0) { ui->checkBox1->setChecked(!checked); return; }
+
     if (checked)
     {
         ui->checkBox1->setText("Accepté");
-        // TO DO (etape 2)
+        /* *** ETAPE 2 - AJOUT *** */
+        envoieRequeteAvecNom(ACCEPT_USER, nom);
     }
     else
     {
         ui->checkBox1->setText("Refusé");
-        // TO DO (etape 2)
+        /* *** ETAPE 2 - AJOUT *** */
+        envoieRequeteAvecNom(REFUSE_USER, nom);
     }
 }
 
 void WindowClient::on_checkBox2_clicked(bool checked)
 {
+    // ETAPE 2.b : le nom associe a la case 2 est celui affiche dans lineEditConnecte2
+    const char* nom = getPersonneConnectee(2);
+    if (strlen(nom) == 0) { ui->checkBox2->setChecked(!checked); return; }
+
     if (checked)
     {
         ui->checkBox2->setText("Accepté");
-        // TO DO (etape 2)
+        /* *** ETAPE 2 - AJOUT *** */
+        envoieRequeteAvecNom(ACCEPT_USER, nom);
     }
     else
     {
         ui->checkBox2->setText("Refusé");
-        // TO DO (etape 2)
+        /* *** ETAPE 2 - AJOUT *** */
+        envoieRequeteAvecNom(REFUSE_USER, nom);
     }
 }
 
 void WindowClient::on_checkBox3_clicked(bool checked)
 {
+    // ETAPE 2.b : le nom associe a la case 3 est celui affiche dans lineEditConnecte3
+    const char* nom = getPersonneConnectee(3);
+    if (strlen(nom) == 0) { ui->checkBox3->setChecked(!checked); return; }
+    
     if (checked)
     {
         ui->checkBox3->setText("Accepté");
-        // TO DO (etape 2)
+        /* *** ETAPE 2.b - AJOUT *** */
+        envoieRequeteAvecNom(ACCEPT_USER, nom);
     }
     else
     {
         ui->checkBox3->setText("Refusé");
-        // TO DO (etape 2)
+        /* ETAPE 2.b - AJOUT*/
+        envoieRequeteAvecNom(REFUSE_USER, nom);
     }
 }
 
 void WindowClient::on_checkBox4_clicked(bool checked)
 {
+    // ETAPE 2.b : le nom associe a la case 4 est celui affiche dans lineEditConnecte2
+    const char* nom = getPersonneConnectee(4);
+    if (strlen(nom) == 0) { ui->checkBox4->setChecked(!checked); return; }
+    
     if (checked)
     {
         ui->checkBox4->setText("Accepté");
-        // TO DO (etape 2)
+        // ETAPE 2.b - AJOUT
+        envoieRequeteAvecNom(ACCEPT_USER, nom);
     }
     else
     {
         ui->checkBox4->setText("Refusé");
-        // TO DO (etape 2)
+        // ETAPE 2.b - AJOUT
+        envoieRequeteAvecNom(REFUSE_USER, nom);
     }
 }
 
 void WindowClient::on_checkBox5_clicked(bool checked)
 {
+    // ETAPE 2.b : le nom associe a la case 5 est celui affiche dans lineEditConnecte2
+    const char* nom = getPersonneConnectee(5);
+    if (strlen(nom) == 0) { ui->checkBox5->setChecked(!checked); return; }
+    
     if (checked)
     {
         ui->checkBox5->setText("Accepté");
-        // TO DO (etape 2)
+        // ETAPE 2.b - AJOUT
+        envoieRequeteAvecNom(ACCEPT_USER, nom);
     }
     else
     {
         ui->checkBox5->setText("Refusé");
-        // TO DO (etape 2)
+        // ETAPE 2.b - AJOUT
+        envoieRequeteAvecNom(REFUSE_USER, nom);
     }
 }
 
@@ -556,15 +609,14 @@ void handlerSIGUSR1(int sig)
     (void) sig;
     MESSAGE m;
 
-    // Le serveur (ou plus tard Consultation/Modification) a toujours deja depose le message qui nous concerne (msgtyp = notre pid) avant de nous
-    // envoyer le signal : cette lecture ne bloque donc pas en pratique.
-    if (msgrcv(idQ,&m,sizeof(MESSAGE)-sizeof(long),getpid(),0) == -1)
+    // *** ÉTAPE 2 - MODIFIÉ *** (remplace l'ancien "if" unique de l'Étape 1b)
+
+    /* But : SIGUSR1 n'est pas mis en file par le noyau. Si le Serveur nous envoie plusieurs messages coup sur coup (ex : plusieurs ADD_USER lors d'un login), 
+    les signaux peuvent se fusionner en un seul réveil. Il faut donc vider la file de TOUT ce qui nous est destiné à chaque réveil, pas lire un seul message. 
+    La boucle s'arrête quand msgrcv renvoie -1 avec errno == ENOMSG (plus rien en attente) 
+    — ce n'est pas une erreur, donc pas de perror ici.*/
+    while (msgrcv(idQ,&m,sizeof(MESSAGE)-sizeof(long),getpid(),IPC_NOWAIT) != -1)
     {
-      perror("(CLIENT) Erreur de msgrcv dans handlerSIGUSR1");
-      return;
-    }
-    // *** ÉTAPE 1b - FIN AJOUT ***
-    
       switch(m.requete)
       {
         case LOGIN :
@@ -580,19 +632,37 @@ void handlerSIGUSR1(int sig)
                     break;
 
         case ADD_USER :
-                    // TO DO
+                    // ETAPE 2.a : on cherche la premiere case libre (1..5) pour y afficher le nouvel utilisateur connu.
+                    for(int i=1 ; i<=5 ; i++)
+                    {
+                      if(strlen(w->getPersonneConnectee(i)) == 0)
+                      {
+                        w->setPersonneConnectee(i, m.data1);
+                        break;
+                      }
+                    }
                     break;
 
         case REMOVE_USER :
-                    // TO DO
+                      // ETAPE 2.a : on cherche la case qui contenait cet utilisateur pour la vider, et on remet le checkbox
+                      // correspondant a "Refuse" (l'ancien reglage n'a plus de sens pour un emplacement desormais vide).
+                      for (int i=1 ; i<=5 ; i++)
+                        if (strcmp(w->getPersonneConnectee(i),m.data1) == 0)
+                        {
+                          w->setPersonneConnectee(i,"");
+                          w->setCheckbox(i,false);
+                          break;
+                        }
                     break;
 
         case SEND :
-                    // TO DO
+                    // ETAPE 2.c : affichage du message recu (m.data1 = nom de l'expediteur, m.texte = contenu du message).
+                    w->ajouteMessage(m.data1,m.texte);
                     break;
 
         case CONSULT :
                   // TO DO
                   break;
-      }
+      }// FIN switch()
+    }// FIN while
 }
