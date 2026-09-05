@@ -3,16 +3,34 @@
 #include <QMessageBox>
 #include "dialogmodification.h"
 #include <unistd.h>
-
+#include <sys/types.h>                 // ETAPE 1a - AJOUTÉ : nécessaire pour msgget/msgsnd (envoi de CONNECT/DECONNECT)
+#include <sys/ipc.h>                   // ETAPE 1a - AJOUTÉ
+#include <sys/msg.h>                   // ETAPE 1a - AJOUTÉ
+#include <signal.h>                    // ETAPE 1b - AJOUTÉ : nécessaire pour sigaction (réception de la réponse au LOGIN)
 extern WindowClient *w;
 
 #include "protocole.h"
 
 int idQ, idShm;
+bool loggedIn = false;    // ETAPE 1a/1b - AJOUTE : memorise si un utilisateur est loggé, pour savoir s'il faut encore envoyer LOGOUT avant DECONNECT 
+                          // à la fermeture et pour activer/désactiver les boutons (1b)  
 #define TIME_OUT 120
 int timeOut = TIME_OUT;
 
 void handlerSIGUSR1(int sig);
+
+/* *** ETAPE 1a - AJOUTE ***
+BUT : petite fonction utilitaire, factorise l'envoi des requêtes qui n'ont pas de données à transmettre (CONNECT, DECONNECT et aussi LOGOUT en 1b).
+Envoie une requete "sans donnees" (CONNECT, DECONNECT ou LOGOUT) au serveur.
+*/
+static void envoiRequeteSimple(int requete)
+{
+  MESSAGE m;
+  m.type = 1; // 1 = destination "Serveur" (voir protocole.h)
+  m.expediteur = getpid();
+  m.requete = requete;
+  msgsnd(idQ, &m, sizeof(MESSAGE) - sizeof(long), 0);
+}
 
 ///////////////////////////////////////////////////////////////////////////////////////////////////////////////
 //////////////////////////////////////////////////////////////////////////////////////////////////////////////
@@ -20,11 +38,23 @@ void handlerSIGUSR1(int sig);
 WindowClient::WindowClient(QWidget *parent):QMainWindow(parent),ui(new Ui::WindowClient)
 {
     ui->setupUi(this);
-    ::close(2);
+    //::close(2); //ferme le descripteur de fichier 2, càd stderr ! --> empeche de voir les messages perror
     logoutOK();
 
     // Recuperation de l'identifiant de la file de messages
     fprintf(stderr,"(CLIENT %d) Recuperation de l'id de la file de messages\n",getpid());
+        // *** ETAPE 1a - DEBUT MODIF ***
+        /*
+        BUT : "la fenêtre client envoie une requête CONNECT au serveur" (énoncé étape 1.a) — mais pour ça, 
+        il faut d'abord récupérer l'identifiant de la file de messages déjà créée par le Serveur. 
+        Avant : seul le fprintf existait, msgget n'était jamais appelé
+        */
+    if ((idQ = msgget(CLE,0)) == -1)
+    {
+      perror("(CLIENT) Erreur de msgget : le Serveur est-il lance ?");
+      exit(1);
+    }
+        // *** ETAPE 1a - FIN MODIF ***
 
     // Recuperation de l'identifiant de la mémoire partagée
     fprintf(stderr,"(CLIENT %d) Recuperation de l'id de la mémoire partagée\n",getpid());
@@ -32,8 +62,19 @@ WindowClient::WindowClient(QWidget *parent):QMainWindow(parent),ui(new Ui::Windo
     // Attachement à la mémoire partagée
 
     // Armement des signaux
-
+        // ***ÉTAPE 1b - DÉBUT AJOUT ***
+        /* But : le serveur "envoie au processus client le signal SIGUSR1 pour le prévenir qu'il lui a envoyé un message" en réponse au LOGIN (énoncé étape 1.b) 
+           il faut donc armer ce signal pour pouvoir le recevoir. 
+         */
+    struct sigaction sa;
+    sa.sa_handler = handlerSIGUSR1;
+    sigemptyset(&sa.sa_mask);
+    sa.sa_flags = 0;
+    sigaction(SIGUSR1,&sa,NULL);
+        // ★★★ ÉTAPE 1b - FIN AJOUT
+    
     // Envoi d'une requete de connexion au serveur
+    envoiRequeteSimple(CONNECT);          // *** ÉTAPE 1a - AJOUTÉ : "avant même d'apparaître, elle envoie une requête CONNECT au serveur" (énoncé étape 1.a) ***
 }
 
 WindowClient::~WindowClient()
@@ -328,7 +369,21 @@ void WindowClient::dialogueErreur(const char* titre,const char* message)
 /////////////////////////////////////////////////////////////////////////////////////////////////////////////
 void WindowClient::closeEvent(QCloseEvent *event)
 {
-    // TO DO
+    (void) event;
+
+    // ***ÉTAPE 1b - AJOUTÉ ***
+    // But : "si un utilisateur clique sur la croix de la fenêtre alors qu'il est loggé, une requête LOGOUT doit être envoyée au serveur avant
+    // l'envoi de la requête DECONNECT" (énoncé étape 1.b).
+    if (loggedIn)
+    {
+        envoiRequeteSimple(LOGOUT);
+        loggedIn = false;
+    }
+
+    // ***  ÉTAPE 1a - AJOUTÉ ***
+    // But : "un clic sur la croix de la fenêtre envoie une requête DECONNECT au serveur [...] puis termine le processus Client" (énoncé étape 1.a).
+    // Avant : il y avait juste "// TO DO" puis QApplication::exit() direct, sans jamais prévenir le serveur.
+    envoiRequeteSimple(DECONNECT);
 
     QApplication::exit();
 }
@@ -338,13 +393,38 @@ void WindowClient::closeEvent(QCloseEvent *event)
 /////////////////////////////////////////////////////////////////////////////////////////////////////////////
 void WindowClient::on_pushButtonLogin_clicked()
 {
-    // TO DO
+    // *** ÉTAPE 1b - DÉBUT AJOUT ***
+    // But : "un clic sur le bouton Login envoie une requête LOGIN au
+    // serveur, celle-ci contient le nom (data2), le mot de passe (texte) et
+    // un entier précisant s'il s'agit d'un nouvel utilisateur ou pas
+    // (data1)" (énoncé étape 1.b). Avant : juste "// TO DO", rien n'était envoyé.
+    if (strlen(getNom()) == 0)
+    {
+        dialogueErreur("Login...","Veuillez encoder un nom d'utilisateur.");
+        return;
+    }
 
+    MESSAGE m;
+    m.type = 1;
+    m.expediteur = getpid();
+    m.requete = LOGIN;
+    strcpy(m.data1,isNouveauChecked() ? "1" : "0");
+    strcpy(m.data2,getNom());
+    strcpy(m.texte,getMotDePasse());
+    msgsnd(idQ,&m,sizeof(MESSAGE)-sizeof(long),0);
+    // *** ÉTAPE 1b - FIN AJOUT ***
 }
 
 void WindowClient::on_pushButtonLogout_clicked()
 {
-    // TO DO
+    // *** ÉTAPE 1b - AJOUTÉ ***
+    // But : "un clic sur le bouton Logout doit envoyer une requête LOGOUT au
+    // serveur" (énoncé étape 1.b). Avant : seul logoutOK() était appelé, le
+    // serveur n'était jamais prévenu.
+    envoiRequeteSimple(LOGOUT);
+    loggedIn = false;
+    // *** ETAPE 1b - FIN AJOUT ***
+
     logoutOK();
 }
 
@@ -469,9 +549,21 @@ void WindowClient::on_checkBox5_clicked(bool checked)
 /////////////////////////////////////////////////////////////////////////////////////////////////////////////
 void handlerSIGUSR1(int sig)
 {
-    MESSAGE m;
+    // *** ÉTAPE 1b - DÉBUT AJOUT ***
+    // But : "le processus Client récupère les infos et les affiche dans la fenêtre" en lisant la réponse déposée par le serveur (énoncé étape 1.b). 
+    // Avant : juste le commentaire "// ...msgrcv(idQ,&m,...)", rien n'était réellement lu.
     
-    // ...msgrcv(idQ,&m,...)
+    (void) sig;
+    MESSAGE m;
+
+    // Le serveur (ou plus tard Consultation/Modification) a toujours deja depose le message qui nous concerne (msgtyp = notre pid) avant de nous
+    // envoyer le signal : cette lecture ne bloque donc pas en pratique.
+    if (msgrcv(idQ,&m,sizeof(MESSAGE)-sizeof(long),getpid(),0) == -1)
+    {
+      perror("(CLIENT) Erreur de msgrcv dans handlerSIGUSR1");
+      return;
+    }
+    // *** ÉTAPE 1b - FIN AJOUT ***
     
       switch(m.requete)
       {
@@ -479,6 +571,7 @@ void handlerSIGUSR1(int sig)
                     if (strcmp(m.data1,"OK") == 0)
                     {
                       fprintf(stderr,"(CLIENT %d) Login OK\n",getpid());
+                      loggedIn = true;  // *** ETAE 1b - AJOUTE : memorise que le login a reussi ! pour closeEvent (1a) et Logout (1b) ***
                       w->loginOK();
                       w->dialogueMessage("Login...",m.texte);
                       // ...
