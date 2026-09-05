@@ -36,3 +36,18 @@
 *.app
 
 # End of https://www.toptal.com/developers/gitignore/api/c++
+
+# Executables du projet (pas d'extension, donc non couverts par les
+# regles generiques ci-dessus)
+Administrateur
+Client
+Serveur
+CreationBD
+BidonFichierPub
+Publicite
+Consultation
+Modification
+
+# Donnees generees lors des tests locaux
+utilisateurs.dat
+publicites.dat
