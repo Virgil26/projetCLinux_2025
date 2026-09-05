@@ -45,7 +45,7 @@ Client: $(CLIENT_OBJS)
 
 # Règle générique de compilation des .cpp Qt en .o
 %.o: %.cpp
-	$(CXX) -c $(CXXFLAGS) $(QTINC) -I. -o $@ $
+	$(CXX) -c $(CXXFLAGS) $(QTINC) -I. -o $@ $<
 
 # --------------------------------------------------------------------------
 # Serveur, CreationBD, Consultation, Modification (utilisent MySQL)
