@@ -19,6 +19,7 @@ bool loggedIn = false;    // ETAPE 1a/1b - AJOUTE : memorise si un utilisateur e
 int timeOut = TIME_OUT;
 
 void handlerSIGUSR1(int sig);
+void handlerSIGALRM(int sig);   // ETAPE 3 - AJOUT
 
 /* *** ETAPE 1a - AJOUTE ***
 BUT : petite fonction utilitaire, factorise l'envoi des requêtes qui n'ont pas de données à transmettre (CONNECT, DECONNECT et aussi LOGOUT en 1b).
@@ -44,6 +45,18 @@ static void envoieRequeteAvecNom(int requete, const char* nom)
   m.requete = requete;
   strcpy(m.data1,nom);
   msgsnd(idQ,&m,sizeof(MESSAGE)-sizeof(long),0);
+}
+
+/* *** ETAPE 3 - AJOUT ***
+BUT : a appeler a chaque action de l'utilisateur (bouton/checkbox) une fois logge,
+pour lui redonner TIME_OUT secondes avant la prochaine deconnexion automatique.
+*/
+static void resetTimeOut()
+{
+  alarm(0);              // annule l'alarme en cours
+  timeOut = TIME_OUT;    // on relance le compte a rebours a 120
+  w->setTimeOut(timeOut);
+  alarm(1);              // prochain tic dans 1 seconde
 }
 ///////////////////////////////////////////////////////////////////////////////////////////////////////////////
 //////////////////////////////////////////////////////////////////////////////////////////////////////////////
@@ -85,6 +98,14 @@ WindowClient::WindowClient(QWidget *parent):QMainWindow(parent),ui(new Ui::Windo
     sa.sa_flags = 0;
     sigaction(SIGUSR1,&sa,NULL);
         // ★★★ ÉTAPE 1b - FIN AJOUT
+
+        // *** ETAPE 3 - AJOUT ***
+        // But : armer SIGALRM pour pouvoir gerer le Time Out d'inactivite.
+    struct sigaction saAlrm;
+    saAlrm.sa_handler = handlerSIGALRM;
+    sigemptyset(&saAlrm.sa_mask);
+    saAlrm.sa_flags = 0;
+    sigaction(SIGALRM,&saAlrm,NULL);
     
     // Envoi d'une requete de connexion au serveur
     envoiRequeteSimple(CONNECT);          // *** ÉTAPE 1a - AJOUTÉ : "avant même d'apparaître, elle envoie une requête CONNECT au serveur" (énoncé étape 1.a) ***
@@ -391,6 +412,7 @@ void WindowClient::closeEvent(QCloseEvent *event)
     {
         envoiRequeteSimple(LOGOUT);
         loggedIn = false;
+        alarm(0);   //ETAPE 3 - AJOUT : pour couper le compte à rebours puisque la session se termine volontairement
     }
 
     // ***  ÉTAPE 1a - AJOUTÉ ***
@@ -437,12 +459,14 @@ void WindowClient::on_pushButtonLogout_clicked()
     envoiRequeteSimple(LOGOUT);
     loggedIn = false;
     // *** ETAPE 1b - FIN AJOUT ***
+    alarm(0);   // ETAPE 3 - AJOUT 
 
     logoutOK();
 }
 
 void WindowClient::on_pushButtonEnvoyer_clicked()
 {
+    resetTimeOut();   //ETAPE 3 - AJOUT
     // ETAPE 2.c : envoi du message au serveur, qui se chargera de le retransmettre aux utilisateurs que CE client a acceptes.
     if (strlen(getAEnvoyer()) == 0) return;
 
@@ -458,13 +482,15 @@ void WindowClient::on_pushButtonEnvoyer_clicked()
 
 void WindowClient::on_pushButtonConsulter_clicked()
 {
-    // TO DO
+    resetTimeOut();   //ETAPE 3 - AJOUT
 
 }
 
 void WindowClient::on_pushButtonModifier_clicked()
 {
   // TO DO
+
+  resetTimeOut();   //ETAPE 3 - AJOUT
   // Envoi d'une requete MODIF1 au serveur
   MESSAGE m;
   // ...
@@ -499,6 +525,7 @@ void WindowClient::on_pushButtonModifier_clicked()
 /////////////////////////////////////////////////////////////////////////////////////////////////////////////
 void WindowClient::on_checkBox1_clicked(bool checked)
 {
+    resetTimeOut();   //ETAPE 3 - AJOUT
     // ETAPE 2.b : le nom associe a la case 1 est celui affiche dans lineEditConnecte1
     const char* nom = getPersonneConnectee(1);
     if (strlen(nom) == 0) { ui->checkBox1->setChecked(!checked); return; }
@@ -519,6 +546,7 @@ void WindowClient::on_checkBox1_clicked(bool checked)
 
 void WindowClient::on_checkBox2_clicked(bool checked)
 {
+    resetTimeOut();   //ETAPE 3 - AJOUT
     // ETAPE 2.b : le nom associe a la case 2 est celui affiche dans lineEditConnecte2
     const char* nom = getPersonneConnectee(2);
     if (strlen(nom) == 0) { ui->checkBox2->setChecked(!checked); return; }
@@ -539,6 +567,7 @@ void WindowClient::on_checkBox2_clicked(bool checked)
 
 void WindowClient::on_checkBox3_clicked(bool checked)
 {
+    resetTimeOut();   //ETAPE 3 - AJOUT
     // ETAPE 2.b : le nom associe a la case 3 est celui affiche dans lineEditConnecte3
     const char* nom = getPersonneConnectee(3);
     if (strlen(nom) == 0) { ui->checkBox3->setChecked(!checked); return; }
@@ -559,6 +588,7 @@ void WindowClient::on_checkBox3_clicked(bool checked)
 
 void WindowClient::on_checkBox4_clicked(bool checked)
 {
+    resetTimeOut();   //ETAPE 3 - AJOUT
     // ETAPE 2.b : le nom associe a la case 4 est celui affiche dans lineEditConnecte2
     const char* nom = getPersonneConnectee(4);
     if (strlen(nom) == 0) { ui->checkBox4->setChecked(!checked); return; }
@@ -579,6 +609,7 @@ void WindowClient::on_checkBox4_clicked(bool checked)
 
 void WindowClient::on_checkBox5_clicked(bool checked)
 {
+    resetTimeOut();   //ETAPE 3 - AJOUT
     // ETAPE 2.b : le nom associe a la case 5 est celui affiche dans lineEditConnecte2
     const char* nom = getPersonneConnectee(5);
     if (strlen(nom) == 0) { ui->checkBox5->setChecked(!checked); return; }
@@ -625,6 +656,8 @@ void handlerSIGUSR1(int sig)
                       fprintf(stderr,"(CLIENT %d) Login OK\n",getpid());
                       loggedIn = true;  // *** ETAE 1b - AJOUTE : memorise que le login a reussi ! pour closeEvent (1a) et Logout (1b) ***
                       w->loginOK();
+                      timeOut = TIME_OUT;    //ETAPE 3 - AJOUT
+                      alarm(1);   //ETAPE 3 - AJOUT : 
                       w->dialogueMessage("Login...",m.texte);
                       // ...
                     }
@@ -665,4 +698,24 @@ void handlerSIGUSR1(int sig)
                   break;
       }// FIN switch()
     }// FIN while
+}
+/* *** ETAPE 3 - AJOUT ***
+BUT : gerer le Time Out d'inactivite. Appele chaque seconde tant que l'utilisateur
+est logge et n'a rien clique. Si le compteur arrive a 0, on force le logout.
+*/
+void handlerSIGALRM(int sig)
+{
+    (void) sig;
+    timeOut--;
+    w->setTimeOut(timeOut);
+    if (timeOut <= 0)
+    {
+        envoiRequeteSimple(LOGOUT);
+        loggedIn = false;
+        w->logoutOK();
+    }
+    else
+    {
+        alarm(1);
+    }
 }
