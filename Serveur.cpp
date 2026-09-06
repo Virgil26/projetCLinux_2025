@@ -473,23 +473,107 @@ int main()
                       break;
 
       case LOGIN_ADMIN :
-                      fprintf(stderr,"(SERVEUR %d) Requete LOGIN_ADMIN reçue de %d\n",getpid(),m.expediteur);
+                      {
+                        fprintf(stderr,"(SERVEUR %d) Requete LOGIN_ADMIN reçue de %d\n",getpid(),m.expediteur);
+                        MESSAGE reponseAdmin;
+                        reponseAdmin.type = m.expediteur;
+                        reponseAdmin.expediteur = getpid();
+                        reponseAdmin.requete = LOGIN_ADMIN;
+                        if (tab->pidAdmin == 0)
+                        {
+                          tab->pidAdmin = m.expediteur;
+                          strcpy(reponseAdmin.data1,"OK");
+                        }
+                        else
+                        {
+                          strcpy(reponseAdmin.data1,"KO");
+                        }
+                        msgsnd(idQ,&reponseAdmin,sizeof(MESSAGE)-sizeof(long),0);
+                      }
                       break;
 
       case LOGOUT_ADMIN :
-                      fprintf(stderr,"(SERVEUR %d) Requete LOGOUT_ADMIN reçue de %d\n",getpid(),m.expediteur);
+                      {
+                        fprintf(stderr,"(SERVEUR %d) Requete LOGOUT_ADMIN reçue de %d\n",getpid(),m.expediteur);
+                        if (tab->pidAdmin == m.expediteur)
+                          tab->pidAdmin = 0;
+                      }                      
                       break;
 
       case NEW_USER :
-                      fprintf(stderr,"(SERVEUR %d) Requete NEW_USER reçue de %d : --%s--%s--\n",getpid(),m.expediteur,m.data1,m.data2);
+                      {
+                        fprintf(stderr,"(SERVEUR %d) Requete NEW_USER reçue de %d : --%s--%s--\n",getpid(),m.expediteur,m.data1,m.data2);
+                        MESSAGE reponseAdmin;
+                        reponseAdmin.type = m.expediteur;
+                        reponseAdmin.expediteur = getpid();
+                        reponseAdmin.requete = NEW_USER;
+                        if (estPresent(m.data1) > 0)
+                        {
+                          strcpy(reponseAdmin.data1,"KO");
+                          sprintf(reponseAdmin.texte,"Un utilisateur nomme %s existe deja.",m.data1);
+                        }
+                        else
+                        {
+                          ajouteUtilisateur(m.data1,hash(m.data2));
+                          char requeteSQL[256];
+                          sprintf(requeteSQL,"INSERT INTO UNIX_FINAL (nom,gsm,email) VALUES ('%s','---','---')",m.data1);
+                          if (mysql_query(connexion,requeteSQL) != 0)
+                            fprintf(stderr,"(SERVEUR) Erreur d'insertion BD pour %s : %s\n",m.data1,mysql_error(connexion));
+                          strcpy(reponseAdmin.data1,"OK");
+                          sprintf(reponseAdmin.texte,"Utilisateur %s cree avec succes.",m.data1);
+                        }
+                        msgsnd(idQ,&reponseAdmin,sizeof(MESSAGE)-sizeof(long),0);
+                      }
                       break;
 
       case DELETE_USER :
-                      fprintf(stderr,"(SERVEUR %d) Requete DELETE_USER reçue de %d : --%s--\n",getpid(),m.expediteur,m.data1);
+                      {
+                        fprintf(stderr,"(SERVEUR %d) Requete DELETE_USER reçue de %d : --%s--\n",getpid(),m.expediteur,m.data1);
+                        MESSAGE reponseAdmin;
+                        reponseAdmin.type = m.expediteur;
+                        reponseAdmin.expediteur = getpid();
+                        reponseAdmin.requete = DELETE_USER;
+                        if (supprimeUtilisateur(m.data1) == 1)
+                        {
+                          char requeteSQL[256];
+                          sprintf(requeteSQL,"DELETE FROM UNIX_FINAL WHERE nom='%s'",m.data1);
+                          if (mysql_query(connexion,requeteSQL) != 0)
+                            fprintf(stderr,"(SERVEUR) Erreur de suppression BD pour %s : %s\n",m.data1,mysql_error(connexion));
+                          strcpy(reponseAdmin.data1,"OK");
+                          sprintf(reponseAdmin.texte,"Utilisateur %s supprime avec succes.",m.data1);
+                        }
+                        else
+                        {
+                          strcpy(reponseAdmin.data1,"KO");
+                          sprintf(reponseAdmin.texte,"Utilisateur %s inconnu.",m.data1);
+                        }
+                        msgsnd(idQ,&reponseAdmin,sizeof(MESSAGE)-sizeof(long),0);
+                      }
                       break;
 
       case NEW_PUB :
-                      fprintf(stderr,"(SERVEUR %d) Requete NEW_PUB reçue de %d\n",getpid(),m.expediteur);
+                      {
+                        fprintf(stderr,"(SERVEUR %d) Requete NEW_PUB reçue de %d\n",getpid(),m.expediteur);
+                        int fichierExistaitDeja = (access("publicites.dat",F_OK) == 0);
+                        int fdPub = open("publicites.dat",O_WRONLY | O_CREAT | O_APPEND, 0600);
+                        if (fdPub == -1)
+                        {
+                          perror("(SERVEUR) Erreur d'ouverture de publicites.dat");
+                        }
+                        else
+                        {
+                          PUBLICITE pub;
+                          strcpy(pub.texte,m.texte);
+                          pub.nbSecondes = atoi(m.data1);
+                          write(fdPub,&pub,sizeof(PUBLICITE));
+                          close(fdPub);
+                          // Si le fichier vient d'etre cree, le processus Publicite est en
+                          // train d'attendre un SIGUSR1 avant de retenter de l'ouvrir (il
+                          // ne devait pas se terminer s'il n'existait pas au demarrage).
+                          if (!fichierExistaitDeja && tab->pidPublicite > 0)
+                            kill(tab->pidPublicite,SIGUSR1);
+                        }
+                      }
                       break;
     }
     afficheTab();
