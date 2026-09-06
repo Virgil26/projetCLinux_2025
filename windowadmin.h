@@ -8,6 +8,10 @@ QT_BEGIN_NAMESPACE
 namespace Ui { class WindowAdmin; }
 QT_END_NAMESPACE
 
+// *** ETAPE 6 - AJOUT ***
+// But : que la fenetre soit fermee via le bouton "Quitter" OU via la croix
+class QCloseEvent;
+
 class WindowAdmin : public QMainWindow
 {
     Q_OBJECT
@@ -28,6 +32,11 @@ public:
     // Boites de dialogue
     void dialogueMessage(const char *titre, const char *message);
     void dialogueErreur(const char *titre, const char *message);
+    
+    // *** ETAPE 6 - AJOUT ***
+    // But : que la fenetre soit fermee via le bouton "Quitter" OU via la croix
+protected :
+    void closeEvent(QCloseEvent *event);
 
 private slots:
     void on_pushButtonAjouterUtilisateur_clicked();
