@@ -15,14 +15,14 @@
 //                          S -> C    nom expediteur                message
 #define UPDATE_PUB    10 // P -> S
 #define CONSULT       11 // C -> S    nom
-                        // S -> Co    nom
-                        // Co -> C    "OK" ou "KO"    gsm           email
+                         // S -> Co    nom
+                         // Co -> C    "OK" ou "KO"    gsm           email
 #define MODIF1        12 // C -> S
-                        // S -> Mo    nom
-                        // Mo -> C                    gsm           email
-                  // ou    Mo -> C    "KO"            "KO"          "KO"         si modif déjà en cours
+                         // S -> Mo    nom
+                         // Mo -> C                    gsm           email
+                         // ou    Mo -> C    "KO"            "KO"          "KO"         si modif déjà en cours
 #define MODIF2        13 // C -> S    mot de passe    gsm           email
-                        // S -> Mo    mot de passe    gsm           email
+                         // S -> Mo    mot de passe    gsm           email
 #define LOGIN_ADMIN   14 // A -> S
                          // S -> A    "OK" ou "KO"
 #define LOGOUT_ADMIN  15 // A -> S
