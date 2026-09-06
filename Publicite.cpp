@@ -16,6 +16,14 @@
 int idQ, idShm;
 int fd;
 
+// *** ETAPE 6 - AJOUT ***
+// Handler "vide" : sert uniquement a interrompre le pause() ci-dessous quand
+// le Serveur signale qu'il vient de creer publicites.dat.
+void handlerSIGUSR1(int sig)
+{
+  (void) sig;
+}
+
 int main()
 {
   // Armement des signaux
@@ -24,6 +32,13 @@ int main()
   sigset_t mask;
   sigaddset(&mask,SIGINT);
   sigprocmask(SIG_SETMASK,&mask,NULL);
+
+  // *** ETAPE 6 - AJOUT ***
+  struct sigaction saUsr1;
+  saUsr1.sa_handler = handlerSIGUSR1;
+  sigemptyset(&saUsr1.sa_mask);
+  saUsr1.sa_flags = 0;
+  sigaction(SIGUSR1,&saUsr1,NULL);
 
   // Recuperation de l'identifiant de la file de messages
   fprintf(stderr,"(PUBLICITE %d) Recuperation de l'id de la file de messages\n",getpid());
@@ -55,13 +70,18 @@ int main()
   }
 
   // Ouverture du fichier de publicité
-  // *** ETAPE 4 : AJOUT ***
-  fd = open("publicites.dat",O_RDONLY);          
-  if (fd == -1)
+  // *** ETAPE 6 - MODIF ***
+  // Si le fichier n'existe pas encore, on ne se termine plus : on attend que
+  // le Serveur nous reveille via SIGUSR1 (des qu'un NEW_PUB de l'Admin l'aura
+  // cree), puis on retente l'ouverture.
+  fd = open("publicites.dat",O_RDONLY);
+  while (fd == -1)
   {
-    perror("(PUBLICITE) Erreur d'ouverture de publicites.dat");
-    exit(1);
+    fprintf(stderr,"(PUBLICITE %d) publicites.dat n'existe pas encore, attente de SIGUSR1...\n",getpid());
+    pause();
+    fd = open("publicites.dat",O_RDONLY);
   }
+
   while(1)
   {
     PUBLICITE pub;
