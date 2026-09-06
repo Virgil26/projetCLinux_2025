@@ -6,6 +6,7 @@
 #include <sys/types.h>                 // ETAPE 1a - AJOUTÉ : nécessaire pour msgget/msgsnd (envoi de CONNECT/DECONNECT)
 #include <sys/ipc.h>                   // ETAPE 1a - AJOUTÉ
 #include <sys/msg.h>                   // ETAPE 1a - AJOUTÉ
+#include <sys/shm.h>                   // ETAPE 4  - AJOUTE
 #include <signal.h>                    // ETAPE 1b - AJOUTÉ : nécessaire pour sigaction (réception de la réponse au LOGIN)
 
 extern WindowClient *w;
@@ -13,6 +14,7 @@ extern WindowClient *w;
 #include "protocole.h"
 
 int idQ, idShm;
+char* zonePublicite;      // ETAPE 4 : AJOUT : pointeur vers la memoire partagee contenant la publicite courante
 bool loggedIn = false;    // ETAPE 1a/1b - AJOUTE : memorise si un utilisateur est loggé, pour savoir s'il faut encore envoyer LOGOUT avant DECONNECT 
                           // à la fermeture et pour activer/désactiver les boutons (1b)  
 #define TIME_OUT 120
@@ -20,6 +22,7 @@ int timeOut = TIME_OUT;
 
 void handlerSIGUSR1(int sig);
 void handlerSIGALRM(int sig);   // ETAPE 3 - AJOUT
+void handlerSIGUSR2(int sig);   // ETAPE 4 - AJOUT
 
 /* *** ETAPE 1a - AJOUTE ***
 BUT : petite fonction utilitaire, factorise l'envoi des requêtes qui n'ont pas de données à transmettre (CONNECT, DECONNECT et aussi LOGOUT en 1b).
@@ -84,10 +87,25 @@ WindowClient::WindowClient(QWidget *parent):QMainWindow(parent),ui(new Ui::Windo
 
     // Recuperation de l'identifiant de la mémoire partagée
     fprintf(stderr,"(CLIENT %d) Recuperation de l'id de la mémoire partagée\n",getpid());
+        // *** ETAPE 4 - AJOUT ***
+    if ((idShm = shmget(CLE,200,0)) == -1)
+    {
+      perror("(CLIENT) Erreur de shmget");
+      exit(1);
+    }
 
     // Attachement à la mémoire partagée
+    
+    // *** ETAPE 4 - AJOUT ***
+    zonePublicite = (char*) shmat(idShm,NULL,0);
+    if (zonePublicite == (char*) -1)
+    {
+      perror("(CLIENT) Erreur de shmat");
+      exit(1);
+    }
 
     // Armement des signaux
+
         // ***ÉTAPE 1b - DÉBUT AJOUT ***
         /* But : le serveur "envoie au processus client le signal SIGUSR1 pour le prévenir qu'il lui a envoyé un message" en réponse au LOGIN (énoncé étape 1.b) 
            il faut donc armer ce signal pour pouvoir le recevoir. 
@@ -97,7 +115,7 @@ WindowClient::WindowClient(QWidget *parent):QMainWindow(parent),ui(new Ui::Windo
     sigemptyset(&sa.sa_mask);
     sa.sa_flags = 0;
     sigaction(SIGUSR1,&sa,NULL);
-        // ★★★ ÉTAPE 1b - FIN AJOUT
+        // *** ÉTAPE 1b - FIN AJOUT ***
 
         // *** ETAPE 3 - AJOUT ***
         // But : armer SIGALRM pour pouvoir gerer le Time Out d'inactivite.
@@ -106,7 +124,15 @@ WindowClient::WindowClient(QWidget *parent):QMainWindow(parent),ui(new Ui::Windo
     sigemptyset(&saAlrm.sa_mask);
     saAlrm.sa_flags = 0;
     sigaction(SIGALRM,&saAlrm,NULL);
-    
+        // *** ETAPE 4 - AJOUT ***
+        // But : le serveur envoie SIGUSR2 a toutes les fenetres connectees des qu'une nouvelle publicite est disponible en memoire partagee.
+    struct sigaction saUsr2;
+    saUsr2.sa_handler = handlerSIGUSR2;
+    sigemptyset(&saUsr2.sa_mask);
+    saUsr2.sa_flags = 0;
+    sigaction(SIGUSR2,&saUsr2,NULL);
+
+
     // Envoi d'une requete de connexion au serveur
     envoiRequeteSimple(CONNECT);          // *** ÉTAPE 1a - AJOUTÉ : "avant même d'apparaître, elle envoie une requête CONNECT au serveur" (énoncé étape 1.a) ***
 }
@@ -699,6 +725,7 @@ void handlerSIGUSR1(int sig)
       }// FIN switch()
     }// FIN while
 }
+
 /* *** ETAPE 3 - AJOUT ***
 BUT : gerer le Time Out d'inactivite. Appele chaque seconde tant que l'utilisateur
 est logge et n'a rien clique. Si le compteur arrive a 0, on force le logout.
@@ -718,4 +745,15 @@ void handlerSIGALRM(int sig)
     {
         alarm(1);
     }
+}
+
+/* *** ETAPE 4 - AJOUT ***
+BUT : appele quand le Serveur previent qu'une nouvelle publicite est disponible
+en memoire partagee (suite a UPDATE_PUB recu par le Publicite). On la relit et
+on l'affiche dans le haut de la fenetre.
+*/
+void handlerSIGUSR2(int sig)
+{
+    (void) sig;
+    w->setPublicite(zonePublicite);
 }
