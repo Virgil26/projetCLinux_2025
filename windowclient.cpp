@@ -510,6 +510,19 @@ void WindowClient::on_pushButtonConsulter_clicked()
 {
     resetTimeOut();   //ETAPE 3 - AJOUT
 
+    // *** ETAPE 5 - AJOUT ***
+    // But : envoyer une requete CONSULT au serveur (qui la transmettra au
+    // processus Consultation) ; la reponse (gsm/email) arrivera plus tard,
+    // de maniere asynchrone, via le case CONSULT du handlerSIGUSR1.
+    if (strlen(getNomRenseignements()) == 0) return;
+
+    MESSAGE m;
+    m.type = 1;
+    m.expediteur = getpid();
+    m.requete = CONSULT;
+    strcpy(m.data1,getNomRenseignements());
+    msgsnd(idQ,&m,sizeof(MESSAGE)-sizeof(long),0);
+
 }
 
 void WindowClient::on_pushButtonModifier_clicked()
@@ -720,7 +733,19 @@ void handlerSIGUSR1(int sig)
                     break;
 
         case CONSULT :
-                  // TO DO
+                  // *** ETAPE 5 - AJOUT ***
+                  // But : reception de la reponse du processus Consultation (relayee par le Serveur) :
+                  // m.data1 = "OK"/"KO", m.data2 = gsm, m.texte = email (voir Consultation.cpp).
+                  if (strcmp(m.data1,"OK") == 0)
+                  {
+                    w->setGsm(m.data2);
+                    w->setEmail(m.texte);
+                  }
+                  else
+                  {
+                    w->setGsm("NON TROUVE");
+                    w->setEmail("NON TROUVE");
+                  }
                   break;
       }// FIN switch()
     }// FIN while
