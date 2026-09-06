@@ -424,11 +424,52 @@ int main()
                       break;
 
       case MODIF1 :
+                    {
                       fprintf(stderr,"(SERVEUR %d) Requete MODIF1 reçue de %d\n",getpid(),m.expediteur);
+                      int idx = trouverConnexionParPid(m.expediteur);
+                      if (idx == -1)
+                      {
+                        fprintf(stderr,"(SERVEUR %d) MODIF1 : fenetre inconnue pour %d\n",getpid(),m.expediteur);
+                        break;
+                      }
+                      pid_t pidModif = fork();
+                      if (pidModif == -1)
+                        perror("(SERVEUR) Erreur de fork pour Modification");
+                      else if (pidModif == 0)
+                      {
+                        execl("./Modification","Modification",NULL);
+                        perror("(SERVEUR) Erreur d'exec de Modification");
+                        exit(1);
+                      }
+                      else
+                      {
+                        tab->connexions[idx].pidModification = pidModif;
+                        MESSAGE msgVersModif;
+                        msgVersModif.type = pidModif;
+                        msgVersModif.expediteur = m.expediteur;              // pid du Client a qui Modification devra repondre
+                        msgVersModif.requete = MODIF1;
+                        strcpy(msgVersModif.data1,tab->connexions[idx].nom); // nom de l'utilisateur loggue sur cette fenetre
+                        msgsnd(idQ,&msgVersModif,sizeof(MESSAGE)-sizeof(long),0);
+                      }
+                    }
                       break;
 
       case MODIF2 :
+                    {
                       fprintf(stderr,"(SERVEUR %d) Requete MODIF2 reçue de %d\n",getpid(),m.expediteur);
+                      int idx = trouverConnexionParPid(m.expediteur);
+                      if (idx != -1 && tab->connexions[idx].pidModification > 0)
+                      {
+                        MESSAGE msgVersModif;
+                        msgVersModif.type = tab->connexions[idx].pidModification;
+                        msgVersModif.expediteur = m.expediteur;
+                        msgVersModif.requete = MODIF2;
+                        strcpy(msgVersModif.data1,m.data1);   // nouveau mot de passe (eventuellement vide)
+                        strcpy(msgVersModif.data2,m.data2);   // gsm modifie
+                        strcpy(msgVersModif.texte,m.texte);   // email modifie
+                        msgsnd(idQ,&msgVersModif,sizeof(MESSAGE)-sizeof(long),0);
+                      }
+                    }
                       break;
 
       case LOGIN_ADMIN :
