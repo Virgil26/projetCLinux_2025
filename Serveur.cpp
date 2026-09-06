@@ -529,4 +529,4 @@ void handlerSIGINT(int sig)
   semctl(idSem, 0, IPC_RMID, 0);
   mysql_close(connexion);
   exit(0);
-}
+} 
