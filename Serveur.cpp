@@ -17,6 +17,14 @@
 #include "FichierUtilisateur.h"   // AJOUTÉ - ETAPE 1b : pour utiliser estPresent/hash/ajouteUtilisateur/verifieMotDePasse
 
 int idQ,idShm,idSem;
+// *** ETAPE 5 : AJOUT ***
+union semun   // union = struct où tous les membres se partagent le même emplacement mémoire.
+{
+  int val;
+  struct semid_ds *buf;
+  unsigned short *array;
+};
+
 TAB_CONNEXIONS *tab;
 
 void afficheTab();
@@ -67,6 +75,20 @@ int main()
     msgctl(idQ, IPC_RMID, NULL);
     exit(1);
   }
+
+  // *** ETAPE 5 - AJOUT ***
+  fprintf(stderr, "(SERVEUR %d) Creation du semaphore d'exclusion BD\n", getpid());
+  if((idSem = semget(CLE,1,IPC_CREAT | IPC_EXCL | 0600)) == -1)
+  {
+    perror("(SERVEUR) Erreur de semget");
+    msgctl(idQ, IPC_RMID, NULL);
+    shmctl(idShm, IPC_RMID, NULL);
+    exit(1);
+  }
+  union semun argSem;
+  argSem.val = 1;   // libre au départ : pas de modification en cours
+  semctl(idSem,0,SETVAL, argSem);
+  // *** ETAPE 5 : FIN AJOUT ***
 
   // Initialisation du tableau de connexions
   fprintf(stderr,"(SERVEUR %d) Initialisation de la table des connexions\n",getpid());
@@ -186,6 +208,13 @@ int main()
                           {
                             ajouteUtilisateur(m.data2,hash(m.texte));
                             // TODO etape 5 : ajouter le tuple (nom,'---','---') dans la table UNIX_FINAL
+                            // *** ETAPE 5 : AJOUT ***
+                            char requeteSQL[256];
+                            sprintf(requeteSQL,"INSERT INTO UNIX_FINAL (nom,gsm,email) VALUES ('%s','---','---')",m.data2);
+                            if (mysql_query(connexion,requeteSQL) != 0)
+                              fprintf(stderr,"(SERVEUR) Erreur d'insertion BD pour %s : %s\n",m.data2,mysql_error(connexion));
+                            // *** ETAPE 5 : FIN AJOUT ***
+                            
                             strcpy(tab->connexions[idx].nom,m.data2);
                             strcpy(reponse.data1,"OK");
                             sprintf(reponse.texte,"Bienvenue %s, votre compte a ete cree !",m.data2);
@@ -350,7 +379,27 @@ int main()
                       break;
 
       case CONSULT :
-                      fprintf(stderr,"(SERVEUR %d) Requete CONSULT reçue de %d\n",getpid(),m.expediteur);
+                      {
+                        fprintf(stderr,"(SERVEUR %d) Requete CONSULT reçue de %d : --%s--\n",getpid(),m.expediteur,m.data1);
+                        pid_t pidConsult = fork();
+                        if (pidConsult == -1)
+                          perror("(SERVEUR) Erreur de fork pour Consultation");
+                        else if (pidConsult == 0)
+                        {
+                          execl("./Consultation","Consultation",NULL);
+                          perror("(SERVEUR) Erreur d'exec de Consultation");
+                          exit(1);
+                        }
+                        else
+                        {
+                          MESSAGE msgVersConsult;
+                          msgVersConsult.type = pidConsult;
+                          msgVersConsult.expediteur = m.expediteur;   // pid du Client a qui Consultation devra repondre
+                          msgVersConsult.requete = CONSULT;
+                          strcpy(msgVersConsult.data1,m.data1);       // nom recherche
+                          msgsnd(idQ,&msgVersConsult,sizeof(MESSAGE)-sizeof(long),0);
+                        }
+                      }
                       break;
 
       case MODIF1 :
@@ -476,7 +525,8 @@ void handlerSIGINT(int sig)
   msgctl(idQ,IPC_RMID,NULL);
   // *** ETAPE 4 : AJOUT ***
   shmctl(idShm,IPC_RMID,NULL);
-  // *** ETAPE 4 : FIN AJOUT ***
+  // *** ETAPE 5 :  AJOUT ***
+  semctl(idSem, 0, IPC_RMID, 0);
   mysql_close(connexion);
   exit(0);
 }
