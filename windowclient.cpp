@@ -8,6 +8,7 @@
 #include <sys/msg.h>                   // ETAPE 1a - AJOUTÉ
 #include <sys/shm.h>                   // ETAPE 4  - AJOUTE
 #include <signal.h>                    // ETAPE 1b - AJOUTÉ : nécessaire pour sigaction (réception de la réponse au LOGIN)
+#include <errno.h>                     // ETAPE 5 - AJOUTÉ : nécessaire pour tester EINTR sur le msgrcv synchrone de MODIF1
 
 extern WindowClient *w;
 
@@ -527,16 +528,40 @@ void WindowClient::on_pushButtonConsulter_clicked()
 
 void WindowClient::on_pushButtonModifier_clicked()
 {
-  // TO DO
 
   resetTimeOut();   //ETAPE 3 - AJOUT
-  // Envoi d'une requete MODIF1 au serveur
+  
+  // *** ETAPE 5 - AJOUT ***
+  /* But : envoyer une requete MODIF1 au serveur, puis attendre SA reponse de
+  maniere SYNCHRONE (msgrcv direct), comme demande explicitement par
+  l'enonce - contrairement a CONSULT qui est asynchrone (signal SIGUSR1)*/
+
+  // SIGUSR1 bloque AVANT même l'envoi de MODIF1 : sinon handlerSIGUSR1 pourrait vider la file avant nous et avaler la reponse MODIF1 (qu'il ne sait pas
+  // traiter) -> blocage infini. 
+  // SIGALRM/SIGUSR2 restent actifs : ils interrompent juste le msgrcv (EINTR), d'ou la boucle de relance.
+  sigset_t masqueUsr1;
+  sigemptyset(&masqueUsr1);
+  sigaddset(&masqueUsr1,SIGUSR1);
+  sigprocmask(SIG_BLOCK,&masqueUsr1,NULL);
+
   MESSAGE m;
-  // ...
+  m.type = 1;
+  m.expediteur = getpid();
+  m.requete = MODIF1;
+  msgsnd(idQ,&m,sizeof(MESSAGE)-sizeof(long),0);
 
   // Attente d'une reponse en provenance de Modification
   fprintf(stderr,"(CLIENT %d) Attente reponse MODIF1\n",getpid());
-  // ...
+
+  while (msgrcv(idQ,&m,sizeof(MESSAGE)-sizeof(long),getpid(),0) == -1)
+  {
+    if (errno == EINTR) continue;
+    perror("(CLIENT) Erreur de msgrcv (MODIF1)");
+    sigprocmask(SIG_UNBLOCK,&masqueUsr1,NULL);
+    return;
+  }
+
+  sigprocmask(SIG_UNBLOCK,&masqueUsr1,NULL);
 
   // Verification si la modification est possible
   if (strcmp(m.data1,"KO") == 0 && strcmp(m.data2,"KO") == 0 && strcmp(m.texte,"KO") == 0)
@@ -555,8 +580,16 @@ void WindowClient::on_pushButtonModifier_clicked()
   strcpy(gsm,dialogue.getGsm());
   strcpy(email,dialogue.getEmail());
 
-  // Envoi des données modifiées au serveur
-  // ...
+  // Envoi des données modifiées au serveur (MODIF2)
+  // *** ETAPE 5 - AJOUT ***
+  MESSAGE m2;
+  m2.type = 1;
+  m2.expediteur = getpid();
+  m2.requete = MODIF2;
+  strcpy(m2.data1,motDePasse);   // vide si l'utilisateur n'a pas voulu le changer
+  strcpy(m2.data2,gsm);
+  strcpy(m2.texte,email);
+  msgsnd(idQ,&m2,sizeof(MESSAGE)-sizeof(long),0);
 }
 
 ///////////////////////////////////////////////////////////////////////////////////////////////////////////////
