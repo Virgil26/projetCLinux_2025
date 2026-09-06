@@ -21,7 +21,7 @@ TAB_CONNEXIONS *tab;
 
 void afficheTab();
 int trouverConnexionParPid(int pid);                        // AJOUTE - ETAPE 1a : déclaration; utilisée pour retrouver une fenêtre lors d'un DECONNECT/LOGIN∕LOGOUT
-int trouverConnexionParNom(const char* nom);                 // AJOUTE - ETAPE 2 : déclaration; utilisée par ACCEPT_USER/REFUSE_USER
+int trouverConnexionParNom(const char* nom);                // AJOUTE - ETAPE 2 : déclaration; utilisée par ACCEPT_USER/REFUSE_USER
 int trouverConnexionLibre();                                // AJOUTE - ETAPE 1 : déclaration ; utilisée pour trouver une place libre lors d'un CONNECT
 void notifieAjout(int pidDest, const char* nomAjoute);      // AJOUTE - ETAPE 2 : déclaration; utilisée par LOGIN
 void notifieRetrait(int pidDest, const char* nomRetire);    // AJOUTE - ETAPE 2 : déclaration; utilisée par LOGOUT
@@ -41,6 +41,7 @@ int main()
   }
 
   // Armement des signaux
+
   // *** ÉTAPE 1c - DÉBUT AJOUT ***
   // But : un <CTRL-C> doit "entrer dans un handler de signal dans lequel il supprime proprement la file de messages et ferme la connexion à la BD"(énoncé étape 1.c). 
   // Sans ça, CTRL-C tuait le process brutalement et laissait la file de messages "polluée" dans le système (visible avec ipcs).
@@ -52,10 +53,18 @@ int main()
   // *** ÉTAPE 1c - FIN AJOUT ***
 
   // Creation des ressources
-  fprintf(stderr,"(SERVEUR %d) Creation de la file de messages\n",getpid());
-  if ((idQ = msgget(CLE,IPC_CREAT | IPC_EXCL | 0600)) == -1)  // CLE definie dans protocole.h
+  fprintf(stderr, "(SERVEUR %d) Creation de la file de message\n", getpid());
+  if((idQ = msgget(CLE, IPC_CREAT | IPC_EXCL | 0600)) == -1)   //CLE definie dans protocole.h
   {
     perror("(SERVEUR) Erreur de msgget");
+    exit(1);
+  }
+  // *** ETAPE 4 : AJOUT ***
+  fprintf(stderr,"(SERVEUR %d) Creation de la memoire partagee pour la Publicite\n",getpid());
+  if ((idShm = shmget(CLE,200,IPC_CREAT | IPC_EXCL | 0600)) == -1) 
+  {
+    perror("(SERVEUR) Erreur de shmget");
+    msgctl(idQ, IPC_RMID, NULL);
     exit(1);
   }
 
@@ -74,6 +83,22 @@ int main()
   tab->pidServeur2 = 0;
   tab->pidAdmin = 0;
   tab->pidPublicite = 0;
+
+  // *** ETAPE 4 : AJOUT ***
+  pid_t pidPub = fork();
+  if (pidPub == -1)
+  {
+    perror("(SERVEUR) Erreur de fork pour Publicite");
+    exit(1);
+  }
+  if (pidPub == 0)
+  {
+    execl("./Publicite","Publicite",NULL);
+    perror("(SERVEUR) Erreur d'exec de Publicite");
+    exit(1);
+  }
+  tab->pidPublicite = pidPub;
+  // *** ETAPE 4 : FIN AJOUT ***
 
   afficheTab();
 
@@ -316,7 +341,12 @@ int main()
                       break;
 
       case UPDATE_PUB :
-                      fprintf(stderr,"(SERVEUR %d) Requete UPDATE_PUB reçue de %d\n",getpid(),m.expediteur);
+                      {
+                        fprintf(stderr,"(SERVEUR %d) Requete UPDATE_PUB reçue de %d\n",getpid(),m.expediteur);
+                        for (int i=0 ; i<6 ; i++)
+                          if (tab->connexions[i].pidFenetre != 0)
+                            kill(tab->connexions[i].pidFenetre,SIGUSR2);
+                      }
                       break;
 
       case CONSULT :
@@ -444,6 +474,9 @@ void handlerSIGINT(int sig)
   (void) sig;
   fprintf(stderr,"\n(SERVEUR %d) Arret demande (CTRL-C), nettoyage des ressources...\n",getpid());
   msgctl(idQ,IPC_RMID,NULL);
+  // *** ETAPE 4 : AJOUT ***
+  shmctl(idShm,IPC_RMID,NULL);
+  // *** ETAPE 4 : FIN AJOUT ***
   mysql_close(connexion);
   exit(0);
 }
