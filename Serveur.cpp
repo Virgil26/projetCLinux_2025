@@ -8,6 +8,7 @@
 #include <sys/shm.h>
 #include <sys/sem.h>
 #include <sys/wait.h>
+#include <errno.h>
 #include <signal.h>
 #include <string.h>
 #include <unistd.h>
@@ -34,7 +35,8 @@ int trouverConnexionLibre();                                // AJOUTE - ETAPE 1 
 void notifieAjout(int pidDest, const char* nomAjoute);      // AJOUTE - ETAPE 2 : déclaration; utilisée par LOGIN
 void notifieRetrait(int pidDest, const char* nomRetire);    // AJOUTE - ETAPE 2 : déclaration; utilisée par LOGOUT
 void handlerSIGINT(int sig);                                // AJOUTE - ETAPE 1 : déclaration du handler de nettoyage au CTRL-C
-
+void handlerSIGCHLD(int sig);                               // AJOUTE - ETAPE 5 : declaration du handler qui recolte les processus Consultation/Modification termines
+void nettoieRessources();                                   // AJOUTE - ETAPE 5 : declaration ; factorise le nettoyage IPC/BD/Publicite (CTRL-C et erreur fatale de msgrcv)
 MYSQL* connexion;
 
 
@@ -59,6 +61,19 @@ int main()
   saInt.sa_flags = 0;
   sigaction(SIGINT,&saInt,NULL);
   // *** ÉTAPE 1c - FIN AJOUT ***
+
+
+  // *** ETAPE 5 - AJOUT ***
+  // But : eviter l'accumulation de processus zombies (Consultation, et plus tard Modification) : des qu'un processus fils se termine, le noyau envoie SIGCHLD.
+  // Attention : sur Linux, msgrcv/msgsnd/semop ne sont JAMAIS relances automatiquement apres une interruption par signal (contrairement a SA_RESTART pour d'autres appels).
+  // Le msgrcv bloquant de la boucle principale sera donc interrompu (errno=EINTR) a
+  // chaque fois qu'un enfant se termine : c'est gere explicitement plus bas.  
+  struct sigaction saChld;
+  saChld.sa_handler = handlerSIGCHLD;
+  sigemptyset(&saChld.sa_mask);
+  saChld.sa_flags = 0;
+  sigaction(SIGCHLD,&saChld,NULL);
+  // *** ETAPE 5 : FIN AJOUT ***
 
   // Creation des ressources
   fprintf(stderr, "(SERVEUR %d) Creation de la file de message\n", getpid());
@@ -139,8 +154,14 @@ int main()
   	fprintf(stderr,"(SERVEUR %d) Attente d'une requete...\n",getpid());
     if (msgrcv(idQ,&m,sizeof(MESSAGE)-sizeof(long),1,0) == -1)
     {
+      // *** ETAPE 5 - AJOUT ***
+      // But : msgrcv est interrompu (EINTR) chaque fois que SIGCHLD arrive pendant l'attente (fin d'un Consultation/Modification) ; ce n'est pas une vraie
+      // erreur, on relance simplement l'attente d'une requete.
+      if(errno == EINTR) continue;
+
       perror("(SERVEUR) Erreur de msgrcv");
-      msgctl(idQ,IPC_RMID,NULL);
+      //msgctl(idQ,IPC_RMID,NULL);    // remplacer plus tard par nettoieRessources();
+      nettoieRessources();
       exit(1);
     }
 
@@ -516,17 +537,54 @@ void notifieRetrait(int pidDest, const char* nomRetire)
   kill(pidDest,SIGUSR1);
 }
 /////////////////////////////////////////////////////////////////////////////
+// *** ETAPE 5 - AJOUTE ***
+// But : factorise le nettoyage des ressources IPC et de la connexion BD,
+// utilise a la fois par l'arret volontaire (CTRL-C, handlerSIGINT) et par
+// un arret force en cas d'erreur fatale de msgrcv dans la boucle principale.
+void nettoieRessources()
+{
+  msgctl(idQ,IPC_RMID,NULL);
+  shmctl(idShm,IPC_RMID,NULL);
+  semctl(idSem,0,IPC_RMID,0);
+  mysql_close(connexion);
+  // On tue aussi le processus "Publicite" pour eviter qu'il ne reste attache au segment de memoire partagee (ce qui empecherait sa suppression
+  // definitive meme apres le shmctl(IPC_RMID) ci-dessus).
+  // Attention : kill(0,...) enverrait le signal a TOUT le groupe de processus (y compris le Serveur lui-meme) ; on verifie donc que
+  // pidPublicite est bien renseigne avant d'appeler kill.
+  if (tab != NULL && tab->pidPublicite > 0)
+    kill(tab->pidPublicite,SIGTERM);
+}
+/////////////////////////////////////////////////////////////////////////////
 // *** ÉTAPE 1c - AJOUTÉ ***
 // But : "supprime proprement la file de messages et ferme la connexion à la base de données" lors d'un <CTRL-C> (énoncé étape 1.c).
 void handlerSIGINT(int sig)
 {
   (void) sig;
   fprintf(stderr,"\n(SERVEUR %d) Arret demande (CTRL-C), nettoyage des ressources...\n",getpid());
-  msgctl(idQ,IPC_RMID,NULL);
-  // *** ETAPE 4 : AJOUT ***
-  shmctl(idShm,IPC_RMID,NULL);
-  // *** ETAPE 5 :  AJOUT ***
-  semctl(idSem, 0, IPC_RMID, 0);
-  mysql_close(connexion);
+  nettoieRessources();
   exit(0);
 } 
+
+
+/////////////////////////////////////////////////////////////////////////////
+// *** ETAPE 5 - AJOUTE ***
+/* BUT : recolte les processus fils (Consultation, plus tard Modification) qui
+se sont termines, pour eviter qu'ils ne restent en zombies. SIGCHLD n'est
+pas mis en file par le noyau (comme SIGUSR1 cote Client) : si plusieurs
+enfants se terminent presque en meme temps, un seul reveil du handler peut
+se produire. On vide donc TOUTES les terminaisons en attente avec une
+boucle waitpid(...,WNOHANG), jamais un seul appel.*/
+void handlerSIGCHLD(int sig)
+{
+  (void) sig;
+  pid_t pidTermine;
+  while ((pidTermine = waitpid(-1,NULL,WNOHANG)) > 0)
+  {
+    fprintf(stderr,"(SERVEUR %d) Processus %d termine (recolte)\n",getpid(),pidTermine);
+    // Si ce pid correspondait a une Modification en cours pour un utilisateur,
+    // on libere la ligne correspondante dans la table de connexions.
+    for (int i=0 ; i<6 ; i++)
+      if (tab->connexions[i].pidModification == pidTermine)
+        tab->connexions[i].pidModification = 0;
+  }
+}
