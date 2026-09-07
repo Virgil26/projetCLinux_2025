@@ -77,7 +77,7 @@ Publicite: Publicite.cpp protocole.h
 clean:
 	rm -f *.o
 
-mrproper: clean
+mrpropre: clean
 	rm -f Administrateur Client Serveur CreationBD BidonFichierPub Publicite Consultation Modification
 
 .PHONY: all clean mrproper
