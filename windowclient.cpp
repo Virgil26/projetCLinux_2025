@@ -27,7 +27,7 @@ void handlerSIGUSR2(int sig);   // ETAPE 4 - AJOUT
 
 /* *** ETAPE 1a - AJOUTE ***
 BUT : petite fonction utilitaire, factorise l'envoi des requêtes qui n'ont pas de données à transmettre (CONNECT, DECONNECT et aussi LOGOUT en 1b).
-Envoie une requete "sans donnees" (CONNECT, DECONNECT ou LOGOUT) au serveur.
+Envoie une requete "sans donnees" (CONNECT, DECONNECT ou LOGOUT) au serveur (à la file de message).
 */
 static void envoiRequeteSimple(int requete)
 {

@@ -201,7 +201,7 @@ int main()
                       // *** ÉTAPE 1a - FIN MODIF ***
 
       case LOGIN :  
-                      // ★★★ ÉTAPE 1b - DÉBUT MODIF (le plus gros morceau)
+                      // *** ÉTAPE 1b - DÉBUT MODIF (le plus gros morceau) ***
                       // But : "le serveur vérifie dans le fichier binaire utilisateurs.dat la présence de l'utilisateur et
                       // vérifie son mot de passe, ou alors il en crée un nouveau" puis répond OK/KO + SIGUSR1 (énoncé étape 1.b).
                       {
@@ -283,7 +283,7 @@ int main()
 
                       }
                       break;
-                      // ★★★ ÉTAPE 1b - FIN MODIF 
+                      // *** ÉTAPE 1b - FIN MODIF ***
 
       case LOGOUT :  
                       // *** ÉTAPE 1b - DÉBUT MODIF ***
